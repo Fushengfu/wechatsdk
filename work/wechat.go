@@ -3,16 +3,16 @@ package work
 import (
 	"encoding/json"
 	"fmt"
+	goredis "github.com/Fushengfu/go-redis"
+	tools "github.com/Fushengfu/wechatsdk/tool"
 	"github.com/astaxie/beego/logs"
-	"lmkweixin/amulet/tool"
-	"lmkweixin/dbs"
-	"lmkweixin/tools/redis"
 	"sync"
 )
 
+var redis = goredis.NewRedisClient(dbs.Rds)
+
 var (
-	Rds              *redis.RedisClient
-	request          tool.Request
+	request          tools.Http
 	API_URL_PREFIX   = "https://qyapi.weixin.qq.com"
 	GET_ACCESS_TOKEN = "/cgi-bin/gettoken?"
 
@@ -107,7 +107,7 @@ var (
 )
 
 type WorkWechat struct {
-	Appid               string
+	CorpId              string
 	Secret              string
 	AccessToken         string
 	SuiteId             string

@@ -1,29 +1,11 @@
 package amulet
 
-import (
-	"github.com/astaxie/beego"
-	"lmkweixin/amulet/weixin"
-	"lmkweixin/amulet/work"
-)
-
-/**
- *  获取微信实例
- */
-func NewWechat(option map[string]string) (w *weixin.Wechat) {
-	wechat := &weixin.Wechat{
-		Model:          option["model"],
-		Appid:          option["appid"],
-		ComponentAppid: beego.AppConfig.String("component::appid"),
-		Secret:         beego.AppConfig.String("component::secret"),
-	}
-
-	return wechat.GetWechat()
-}
+import "github.com/Fushengfu/wechatsdk/work"
 
 /**
  *  获取企业微信实例
     weixin := &work.WorkWechat{
-		Appid:       option["appid"],
+		CorpId:       option["corpid"],
 		Secret:      option["secret"],
 		SuiteId:     option["suite_id"],
 		SuiteSecret: option["suite_secret"],
@@ -32,8 +14,8 @@ func NewWechat(option map[string]string) (w *weixin.Wechat) {
 	}
 */
 func NewWorkWechat(option map[string]string) (w *work.WorkWechat) {
-	if _, ok := option["appid"]; !ok {
-		option["appid"] = ""
+	if _, ok := option["corpid"]; !ok {
+		option["corpid"] = ""
 	}
 
 	if _, ok := option["secret"]; !ok {
@@ -57,7 +39,7 @@ func NewWorkWechat(option map[string]string) (w *work.WorkWechat) {
 	}
 
 	weixin := &work.WorkWechat{
-		Appid:         option["appid"],
+		CorpId:        option["corpid"],
 		Secret:        option["secret"],
 		SuiteId:       option["suite_id"],
 		SuiteSecret:   option["suite_secret"],

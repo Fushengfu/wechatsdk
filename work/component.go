@@ -2,9 +2,9 @@ package work
 
 import (
 	"encoding/json"
-	"errors"
 	"github.com/astaxie/beego/logs"
 	"net/url"
+	"reflect"
 )
 
 type Component struct {
@@ -20,45 +20,41 @@ type Component struct {
     "expires_in":7200
 }
 */
-func (w *WorkWechat) GetSuiteToken() *WorkWechat {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	key := "WECHAT_QY::SUITE_ACCESS_TOKEN_" + w.SuiteId
+func (self *WorkWechat) GetSuiteToken() *WorkWechat {
+	self.mu.Lock()
+	defer self.mu.Unlock()
+	key := "WECHAT_QY::SUITE_ACCESS_TOKEN_" + self.SuiteId
+	var err error
 
-	str := Rds.Get(key)
-	data := make(map[string]interface{})
-	var er error
-	if str == "" {
+	var suiteAccToken suiteAccessToken
+
+	str, err := self.GetCache(key)
+	if err != nil {
 		body := map[string]interface{}{
-			"suite_id":     w.SuiteId,
-			"suite_secret": w.SuiteSecret,
-			"suite_ticket": w.SuiteTicket,
+			"suite_id":     self.SuiteId,
+			"suite_secret": self.SuiteSecret,
+			"suite_ticket": self.SuiteTicket,
 		}
 
 		url := API_URL_PREFIX + GET_SUITE_TOKEN
-		result, err := w.sendForm("POST", url, body)
-		logs.Critical(url, result, err)
-		if err == nil {
-			er = json.Unmarshal([]byte(result), &data)
+		str, err = self.sendForm("POST", url, body)
+		logs.Critical(url, str, err)
+	}
 
-			_, ok := data["errcode"]
-			if er == nil && (!ok || ToInt(data["errcode"]) == 0) {
-				Rds.Set(key, result, ToInt(data["expires_in"])-120)
-			}
+	if err == nil {
+		err = json.Unmarshal([]byte(str), &suiteAccToken)
+		if err == nil && suiteAccToken.Errcode == 0 {
+			self.SetCacheNx(key, str, suiteAccToken.ExpiresIn-120)
 		}
+	}
 
+	if suiteAccToken.Errcode != 0 || suiteAccToken.SuiteAccessToken == nil {
+		logs.Critical("解析SUITE_ACCESS_TOKEN失败：", str)
 	} else {
-		er = json.Unmarshal([]byte(str), &data)
+		self.SuiteAccessToken = reflect.ValueOf(suiteAccToken.SuiteAccessToken).Elem().String()
 	}
 
-	errcode, ok := data["errcode"]
-	if er != nil {
-		logs.Critical("解析SUITE_ACCESS_TOKEN失败：", er.Error(), str)
-	} else if !ok || ToInt(errcode) == 0 {
-		w.SuiteAccessToken = ToString(data["suite_access_token"])
-	}
-
-	return w
+	return self
 }
 
 /**
@@ -71,10 +67,10 @@ func (w *WorkWechat) GetSuiteToken() *WorkWechat {
     "expires_in":1200
 }
 */
-func (w *WorkWechat) GetPreAuthCode() (str string, err error) {
-	w.GetSuiteToken()
-	url := API_URL_PREFIX + GET_PRE_AUTH_CODE + w.SuiteAccessToken
-	str, err = w.sendForm("GET", url, nil)
+func (self *WorkWechat) GetPreAuthCode() (str string, err error) {
+	self.GetSuiteToken()
+	url := API_URL_PREFIX + GET_PRE_AUTH_CODE + self.SuiteAccessToken
+	str, err = self.sendForm("GET", url, nil)
 	return str, err
 }
 
@@ -86,18 +82,18 @@ func (w *WorkWechat) GetPreAuthCode() (str string, err error) {
     "errmsg": "ok"
 }
 */
-func (w *WorkWechat) SetSessionInfo(appids []string, authType int) (str string, err error) {
-	w.GetPreAuthCode()
+func (self *WorkWechat) SetSessionInfo(appids []string, authType int) (str string, err error) {
+	self.GetPreAuthCode()
 	data := map[string]interface{}{
-		"pre_auth_code": w.PreAuthCode,
+		"pre_auth_code": self.PreAuthCode,
 		"session_info": map[string]interface{}{
 			"appid":     appids,
 			"auth_type": authType, //授权类型：0 正式授权， 1 测试授权。 默认值为0。注意，请确保应用在正式发布后的授权类型为“正式授权”
 		},
 	}
 
-	url := API_URL_PREFIX + SET_SESSION_INFO + w.SuiteAccessToken
-	str, err = w.sendForm("POST", url, data, appids, authType)
+	url := API_URL_PREFIX + SET_SESSION_INFO + self.SuiteAccessToken
+	str, err = self.sendForm("POST", url, data, appids, authType)
 	return str, err
 }
 
@@ -186,23 +182,22 @@ func (w *WorkWechat) SetSessionInfo(appids []string, authType int) (str string, 
     }
 }
 */
-func (w *WorkWechat) GetPermanentCode(auth_code string) (str string, err error) {
-	w.GetSuiteToken()
+func (self *WorkWechat) GetPermanentCode(authCode string) (str string, err error) {
+	self.GetSuiteToken()
 	data := map[string]interface{}{
-		"auth_code": auth_code,
+		"auth_code": authCode,
 	}
 
-	url := API_URL_PREFIX + GET_PERMANMENT_CODE + w.SuiteAccessToken
-	str, err = w.sendForm("POST", url, data)
+	url := API_URL_PREFIX + GET_PERMANMENT_CODE + self.SuiteAccessToken
+	str, err = self.sendForm("POST", url, data)
 	if err == nil {
 		info := make(map[string]interface{})
 		er := json.Unmarshal([]byte(str), &info)
 		_, ok := info["errcode"]
-		logs.Critical("PERMANENT_CODE:", er == nil && (!ok || ToInt(info["errcode"]) == 0), "permanent_code:", info["permanent_code"].(string))
+
 		if er == nil && (!ok || ToInt(info["errcode"]) == 0) {
-			auth_corp_info := info["auth_corp_info"].(map[string]interface{})
-			logs.Critical("PERMANENT_CODE::"+auth_corp_info["corpid"].(string), "permanent_code:", info["permanent_code"].(string))
-			Rds.Set("PERMANENT_CODE::"+auth_corp_info["corpid"].(string), info["permanent_code"].(string), 0)
+			authCorpInfo := info["auth_corp_info"].(map[string]interface{})
+			self.SetCacheNx("PERMANENT_CODE::"+"_"+self.SuiteId+"_"+authCorpInfo["corpid"].(string), info["permanent_code"].(string), 0)
 		}
 	}
 
@@ -277,14 +272,14 @@ func (w *WorkWechat) GetPermanentCode(auth_code string) (str string, err error) 
     }
 }
 */
-func (w *WorkWechat) GetAuthInfo(auth_corpid string) (str string, err error) {
+func (self *WorkWechat) GetAuthInfo(authCorpid string) (str string, err error) {
 	data := map[string]interface{}{
-		"auth_corpid":    auth_corpid,
-		"permanent_code": Rds.Get("PERMANENT_CODE::" + w.Appid),
+		"auth_corpid":    authCorpid,
+		"permanent_code": self.GetCache("PERMANENT_CODE::" + "_" + self.SuiteId + "_" + authCorpid),
 	}
 
-	url := API_URL_PREFIX + GET_AUTH_INFO + w.SuiteAccessToken
-	str, err = w.sendForm("POST", url, data)
+	url := API_URL_PREFIX + GET_AUTH_INFO + self.SuiteAccessToken
+	str, err = self.sendForm("POST", url, data)
 	return str, err
 }
 
@@ -298,52 +293,64 @@ func (w *WorkWechat) GetAuthInfo(auth_corpid string) (str string, err error) {
     "expires_in": 7200
 }
 */
-func (w *WorkWechat) GetCorpToken() (str string, err error) {
-	key := "WECHAT_QY::AUTH_CORPID_" + w.Appid
+func (self *WorkWechat) GetCorpToken() (str string, err error) {
+	key := "WECHAT_QY::AUTH_CORPID_" + self.SuiteId + "_" + self.CorpId
 	logs.Critical("WECHAT_QY_AUTH_CORPID:", key)
-	str = Rds.Get(key)
+	str, err = self.GetCache(key)
 
-	if str != "" {
-		tmp := make(map[string]interface{})
-		er := json.Unmarshal([]byte(str), &tmp)
-		if er == nil && w.AccessToken == ToString(tmp["access_token"]) {
-			Rds.Del(key)
-		} else if er == nil {
-			w.AccessToken = ToString(tmp["access_token"])
-		} else {
-			logs.Critical("解析TOLKEN信息异常：", er, "AccessToken:", w.AccessToken, "tmp:", tmp)
+	var authAccToken authAccessToken
+
+	if err != nil {
+		data := map[string]interface{}{
+			"auth_corpid":    self.CorpId,
+			"permanent_code": self.PermanentCode,
 		}
+
+		logs.Critical("strstrstr:", data, self.CorpId)
+
+		url := API_URL_PREFIX + GET_CORP_TOKEN + self.SuiteAccessToken
+		str, err = self.sendForm("POST", url, data)
 	}
 
-	if str == "" {
-		permanentCode := Rds.Get("PERMANENT_CODE::" + w.Appid)
-		if permanentCode == "" {
-			return str, errors.New("PERMANENT_CODE 为空")
-		}
+	if err != nil {
+		return str, err
+	}
 
-		data := map[string]interface{}{
-			"auth_corpid":    w.Appid,
-			"permanent_code": permanentCode,
-		}
-		logs.Critical("strstrstr:", data, w.Appid)
+	er := json.Unmarshal([]byte(str), &authAccToken)
+	if er == nil && authAccToken.Errcode == 0 {
+		self.AccessToken = reflect.ValueOf(authAccToken.AccessToken).Elem().String()
+		self.SetCacheNx(key, str, authAccToken.ExpiresIn-120)
+	}
 
-		url := API_URL_PREFIX + GET_CORP_TOKEN + w.SuiteAccessToken
-		str, err = w.sendForm("POST", url, data)
+	return str, err
+}
+
+/**
+ * 获取accessToken
+ */
+func (self *WorkWechat) getAccessToken() (str string, er error) {
+	key := "WECHAT::" + self.Secret + "qy_access_token"
+	url := API_URL_PREFIX + GET_ACCESS_TOKEN + "corpid=" + self.CorpId + "&corpsecret=" + self.Secret
+
+	var tokenInfo authAccessToken
+	for i := 0; i < 3; i++ {
+		res, err := self.sendForm("GET", url, nil)
+
 		if err != nil {
+			return str, err
+		}
+
+		if err = json.Unmarshal([]byte(res), &tokenInfo); err == nil && tokenInfo.Errcode == 0 {
+			self.SetCacheNx(key, res, tokenInfo.ExpiresIn-120)
+
+			return reflect.ValueOf(tokenInfo.AccessToken).Elem().String(), nil
+
+		} else {
 			return str, err
 		}
 	}
 
-	info := make(map[string]interface{})
-	er := json.Unmarshal([]byte(str), &info)
-	errcode, ok := info["errcode"]
-
-	if er == nil && (!ok || ToInt(errcode) == 0) {
-		w.AccessToken = ToString(info["access_token"])
-		Rds.Set(key, str, ToInt(info["expires_in"])-120)
-	}
-
-	return str, err
+	return str, er
 }
 
 /**
@@ -358,30 +365,30 @@ func (w *WorkWechat) GetCorpToken() (str string, err error) {
     ]
 }
 */
-func (w *WorkWechat) GetAdminList(auth_corpid string) (str string, err error) {
+func (self *WorkWechat) GetAdminList(authCorpid, agentid interface{}) (str string, err error) {
 	data := map[string]interface{}{
-		"auth_corpid": "auth_corpid_value",
-		"agentid":     1000046,
+		"auth_corpid": authCorpid,
+		"agentid":     agentid,
 	}
 
-	url := API_URL_PREFIX + GET_ADMIN_LIST + w.SuiteAccessToken
-	str, err = w.sendForm("POST", url, data)
+	url := API_URL_PREFIX + GET_ADMIN_LIST + self.SuiteAccessToken
+	str, err = self.sendForm("POST", url, data)
 	return str, err
 }
 
 /**
  *  网页授权登录
  */
-func (w *WorkWechat) GetAuthorizeUrl(uri string) string {
+func (self *WorkWechat) GetAuthorizeUrl(uri string) string {
 	uri, _ = url.QueryUnescape(uri)
-	url := "https://open.weixin.qq.com/connect/oauth2/authorize?appid=" + w.SuiteId + "&redirect_uri=" + uri + "&response_type=code&scope=snsapi_userinfo&state=STATE#wechat_redirect"
+	url := "https://open.weixin.qq.com/connect/oauth2/authorize?appid=" + self.SuiteId + "&redirect_uri=" + uri + "&response_type=code&scope=snsapi_userinfo&state=STATE#wechat_redirect"
 	return url
 }
 
 /**
  *  获取访问用户身份
  */
-func (w *WorkWechat) GetUserInfo(code string) (string, error) {
-	uri := "https://qyapi.weixin.qq.com/cgi-bin/service/getuserinfo3rd?suite_access_token=" + w.SuiteAccessToken + "&code=" + code
+func (self *WorkWechat) GetUserInfo(code string) (string, error) {
+	uri := "https://qyapi.weixin.qq.com/cgi-bin/service/getuserinfo3rd?suite_access_token=" + self.SuiteAccessToken + "&code=" + code
 	return request.Get(uri, nil)
 }

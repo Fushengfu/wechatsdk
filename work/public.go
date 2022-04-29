@@ -33,7 +33,7 @@ func (w *WorkWechat) callBack(method string, params ...interface{}) (string, err
 	_method := mCall.MethodByName(method)
 	invalidMethod := _method == reflect.Value{}
 
-	logs.Critical("回调次数：", w.Limit, method, invalidMethod, "企业ID:", w.Appid, w)
+	logs.Critical("回调次数：", w.Limit, method, invalidMethod, "企业ID:", w.CorpId, w)
 	if invalidMethod {
 		w.Limit = 0
 		return "", errors.New("找不到回调方法：" + method)
@@ -56,9 +56,9 @@ func (w *WorkWechat) callBack(method string, params ...interface{}) (string, err
 /**
  *  发起网络请求
  */
-func (w *WorkWechat) sendForm(method string, uri string, data map[string]interface{}, params ...interface{}) (string, error) {
-	if len(w.Appid) > 0 && len(w.Appid) < 18 {
-		w.Limit = 0
+func (self *WorkWechat) sendForm(method string, uri string, data map[string]interface{}, params ...interface{}) (string, error) {
+	if len(self.CorpId) > 0 && len(self.CorpId) < 18 {
+		self.Limit = 0
 		return "", errors.New("非法APPID")
 	}
 
@@ -76,44 +76,44 @@ func (w *WorkWechat) sendForm(method string, uri string, data map[string]interfa
 
 	if err != nil {
 		logs.Critical("Http请求", "请求方法："+method, "Url:"+uri, "请求参数：", string(inputData), "\r\n", "请求结果：", str, err)
-		w.Limit = 0
+		self.Limit = 0
 		return str, err
 	} else {
 		err = json.Unmarshal([]byte(str), &result)
 		if err != nil {
-			w.Limit = 0
+			self.Limit = 0
 			return str, err
 		}
 
 		errcode, ok := result["errcode"]
-		if ok && inArray(int64(errcode.(float64)), []int64{41001, 42001, 40014, 45033, 45009}) && w.Limit < 3 {
+		if ok && inArray(int64(errcode.(float64)), []int64{41001, 42001, 40014, 45033, 45009}) && self.Limit < 3 {
 			logs.Critical("Http请求", "请求方法："+method, "Url:"+uri, "请求参数：", string(inputData), "\r\n", "请求结果：", str, err)
 
 			pc, _, _, ok1 := runtime.Caller(1)
-			logs.Critical("W:", w)
+			logs.Critical("W:", self)
 			if ok1 {
-				w.Limit = w.Limit + 1
+				self.Limit = self.Limit + 1
 
 				if !inArray(int64(errcode.(float64)), []int64{45033, 45009}) {
-					Rds.Del("WECHAT_QY::AUTH_CORPID_" + w.Appid)
-					if len(w.SuiteId) == 0 {
-						w.AccessToken, _ = w.getAccessToken()
+					self.DelCache("WECHAT_QY::AUTH_CORPID_" + self.CorpId)
+					if len(self.SuiteId) == 0 {
+						self.AccessToken, _ = self.getAccessToken()
 					} else {
-						_, _ = w.GetCorpToken()
+						_, _ = self.GetCorpToken()
 					}
 				} else {
 					time.Sleep(time.Millisecond * 500)
-					w.Limit = 3
+					self.Limit = 3
 				}
 
 				f := runtime.FuncForPC(pc)
 				actionArr := strings.Split(f.Name(), ".")
 				if len(actionArr) > 0 {
 					_action := actionArr[len(actionArr)-1]
-					return w.callBack(_action, params...)
+					return self.callBack(_action, params...)
 				}
 			}
-			w.Limit = 0
+			self.Limit = 0
 		}
 
 		if ok && inArray(int64(errcode.(float64)), []int64{45033, 45009}) {
@@ -121,7 +121,7 @@ func (w *WorkWechat) sendForm(method string, uri string, data map[string]interfa
 		}
 	}
 
-	w.Limit = 0
+	self.Limit = 0
 	return str, err
 }
 
@@ -145,14 +145,14 @@ func ToString(data interface{}) string {
 		return ""
 	}
 
-	switch reflect.TypeOf(data).String() {
-	case "string":
+	switch data.(type) {
+	case string:
 		return data.(string)
-	case "int":
+	case int:
 		return strconv.Itoa(data.(int))
-	case "float64":
+	case float64:
 		return strconv.Itoa(int(int64(data.(float64))))
-	case "float32":
+	case float32:
 		return strconv.Itoa(int(int32(data.(float32))))
 	default:
 		bytes, _ := json.Marshal(data)
@@ -168,17 +168,17 @@ func ToInt(data interface{}) int {
 		return 0
 	}
 
-	switch reflect.TypeOf(data).String() {
-	case "string":
+	switch data.(type) {
+	case string:
 		va, _ := strconv.Atoi(data.(string))
 		return va
-	case "int":
+	case int:
 		return data.(int)
-	case "float64":
+	case float64:
 		return int(int64(data.(float64)))
-	case "float32":
+	case float32:
 		return int(int32(data.(float32)))
-	case "int64":
+	case int64:
 		return int(data.(int64))
 	default:
 		return 0

@@ -14,19 +14,19 @@ import (
 )
 
 type Http struct {
-	UserAgent string
-	Request *http.Request
-	Response *http.Response
-	Jar *cookiejar.Jar
-	client *http.Client
-	cookies []*http.Cookie
+	UserAgent   string
+	Request     *http.Request
+	Response    *http.Response
+	Jar         *cookiejar.Jar
+	client      *http.Client
+	cookies     []*http.Cookie
 	contentType string
 }
 
 /**
  *  GET 请求
  */
-func (this *Http) Get(uri string, querys map[string]string) (res string, err error) {
+func (this *Http) Get(uri string, querys map[string]interface{}) (res string, err error) {
 	if nil != querys {
 		uri = this.HttpBuildQuery(uri, querys)
 	}
@@ -42,7 +42,7 @@ func (this *Http) Get(uri string, querys map[string]string) (res string, err err
 /**
  *  POST 请求
  */
-func (this *Http) Post(url string, body interface{},) (res string, err error) {
+func (this *Http) Post(url string, body interface{}) (res string, err error) {
 	err = this.InitRquest("POST", url, body, "json")
 	if err != nil {
 		return "", err
@@ -53,7 +53,7 @@ func (this *Http) Post(url string, body interface{},) (res string, err error) {
 /**
  *  POST 请求
  */
-func (this *Http) PostForm(url string, body interface{},) (res string, err error) {
+func (this *Http) PostForm(url string, body interface{}) (res string, err error) {
 	err = this.InitRquest("POST", url, body, "form")
 	if err != nil {
 		return "", err
@@ -64,12 +64,12 @@ func (this *Http) PostForm(url string, body interface{},) (res string, err error
 /**
  *  生成请求参数
  */
-func (this *Http) HttpBuildQuery(uri string, querys map[string]string) string {
+func (this *Http) HttpBuildQuery(uri string, querys map[string]interface{}) string {
 	params := url.Values{}
 	Url, _ := url.Parse(uri)
 
 	for k, v := range querys {
-		params.Set(k, v)
+		params.Set(k, v.(string))
 	}
 
 	Url.RawQuery = params.Encode()
@@ -101,7 +101,7 @@ func (this *Http) send() (respone string, err error) {
 	 *  初始化cookie
 	 */
 	if nil == this.Jar {
-		this.Jar,_ = cookiejar.New(nil)
+		this.Jar, _ = cookiejar.New(nil)
 		this.Jar.SetCookies(this.Request.URL, this.cookies)
 	}
 
@@ -117,7 +117,6 @@ func (this *Http) send() (respone string, err error) {
 	}
 
 	this.cookies = this.Jar.Cookies(this.Request.URL)
-
 
 	defer this.Response.Body.Close()
 
@@ -137,7 +136,7 @@ func (this *Http) send() (respone string, err error) {
  *  获取cookie
  */
 func (this *Http) GetCookie(key string) string {
-	for _,v := range this.cookies {
+	for _, v := range this.cookies {
 		fmt.Println(url.QueryUnescape(v.Value))
 		fmt.Println(v.Name)
 		if v.Name == key {
@@ -184,13 +183,13 @@ func (this *Http) InitRquest(method, uri string, args interface{}, contentType s
 /**
  *  实例化客户端对象
  */
-func (this *Http) InitClient()  {
+func (this *Http) InitClient() {
 	if nil == this.client {
 		this.client = &http.Client{
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
-			Jar: this.Jar,
+			Jar:     this.Jar,
 			Timeout: 120 * time.Second,
 		}
 	}
@@ -199,11 +198,11 @@ func (this *Http) InitClient()  {
 /**
  *  设置请求头信息
  */
-func (this *Http) setHeaders()  {
+func (this *Http) setHeaders() {
 	this.Request.Header.Set("User-Agent", this.getUserAgent())
 	this.Request.Header.Set("Content-Type", this.contentType)
 	this.Request.Header.Set("sec-ch-ua", "\" Not A;Brand\";v=\"99\", \"Chromium\";v=\"100\", \"Google Chrome\";v=\"100\"")
-	this.Request.Header.Set("Accept"," text/html,application/xhtml+xml,application/xml;application/json;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9")
+	this.Request.Header.Set("Accept", " text/html,application/xhtml+xml,application/xml;application/json;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9")
 	this.Request.Header.Set("Host", this.Request.Host)
 }
 
@@ -211,7 +210,6 @@ func (this *Http) setHeaders()  {
  *  随机获取ua
  */
 func (this *Http) getUserAgent() string {
-
 	userAgents := []string{
 		"Mozilla/5.0 (Windows NT 6.1; rv:2.0.1) Gecko/20100101 Firefox/4.0.1",
 		"Mozilla/5.0 (Windows NT 6.1) AppleWebKit/536.11 (KHTML, like Gecko) Chrome/20.0.1132.57 Safari/536.11",

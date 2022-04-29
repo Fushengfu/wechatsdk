@@ -2,16 +2,40 @@ package work
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	goredis "github.com/Fushengfu/go-redis"
-	tools "github.com/Fushengfu/wechatsdk/tool"
+	"github.com/Fushengfu/wechatsdk/tool"
 	"github.com/astaxie/beego/logs"
 	"sync"
+	"time"
 )
 
-var redis = goredis.NewRedisClient(dbs.Rds)
-
 var (
+	/**
+	 *  缓存数据
+	 */
+	StoreCacheMap map[string]*StoreCache
+
+	/**
+	 *  永久授权码列表
+	 */
+	PermanentCodeMap map[string]string
+
+	/**
+	 *  授权企业token列表
+	 */
+	AuthAccessTokenMap map[string]authAccessToken
+
+	/**
+	 *  第三方应用凭证列表
+	 */
+	SuiteAccessTokenMap map[string]suiteAccessToken
+
+	/**
+	 *  jsapi_ticket 列表
+	 */
+	JsapiTicketMap map[string]jsapiTicket
+
 	request          tools.Http
 	API_URL_PREFIX   = "https://qyapi.weixin.qq.com"
 	GET_ACCESS_TOKEN = "/cgi-bin/gettoken?"
@@ -107,87 +131,167 @@ var (
 )
 
 type WorkWechat struct {
-	CorpId              string
-	Secret              string
-	AccessToken         string
-	SuiteId             string
-	SuiteSecret         string
-	SuiteTicket         string
-	SuiteAccessToken    string
-	ProviderAccessToken string
-	PreAuthCode         string
-	PermanentCode       string
-	Limit               int
-	Remark              int
-	mu                  sync.Mutex
+	ProviderCorpid      string     `json:"provider_corpid"`
+	ProviderSecret      string     `json:"provider_secret"`
+	CorpId              string     `json:"corp_id"`
+	Secret              string     `json:"secret"`
+	AccessToken         string     `json:"access_token"`
+	Agentid             string     `json:"agentid"`
+	SuiteId             string     `json:"suite_id"`
+	SuiteSecret         string     `json:"suite_secret"`
+	SuiteTicket         string     `json:"suite_ticket"`
+	SuiteAccessToken    string     `json:"suite_access_token"`
+	ProviderAccessToken string     `json:"provider_access_token"`
+	PreAuthCode         string     `json:"pre_auth_code"`
+	PermanentCode       string     `json:"permanent_code"`
+	Limit               int        `json:"limit"`
+	Remark              int        `json:"remark"`
+	mu                  sync.Mutex `json:"-"`
 }
 
-func init() {
-	Rds = redis.NewRedisClient(dbs.Rds)
+/**
+ *  缓存数据
+ */
+type StoreCache struct {
+	Type      string `json:"type"`
+	Data      string `json:"data"`
+	ExpiresIn int    `json:"expires_in"`
+	StartAt   int    `json:"start_at"`
+	EndAt     int    `json:"end_at"`
+}
+
+/**
+ *  存储键值对数据
+ */
+func (self *WorkWechat) SetCache(key, val string, expires int) int {
+	cache := new(StoreCache)
+	cache.Type = "string"
+	cache.Data = val
+	cache.StartAt = int(time.Now().Unix())
+	cache.ExpiresIn = expires
+	cache.EndAt = cache.StartAt + expires
+	StoreCacheMap[key] = cache
+
+	return 1
+}
+
+/**
+ *  存储键值对数据
+ */
+func (self *WorkWechat) SetCacheNx(key, val string, expires int) int {
+	if _, ok := StoreCacheMap[key]; ok {
+		return 0
+	}
+
+	cache := new(StoreCache)
+	cache.Type = "string"
+	cache.Data = val
+	cache.StartAt = int(time.Now().Unix())
+	cache.ExpiresIn = expires
+	cache.EndAt = cache.StartAt + expires
+	StoreCacheMap[key] = cache
+
+	return 1
+}
+
+/**
+ *  取出缓存数据
+ */
+func (self *WorkWechat) GetCache(key string) (string, error) {
+	_, ok := StoreCacheMap[key]
+
+	if ok &&
+		StoreCacheMap[key].EndAt >= int(time.Now().Unix()) {
+		return StoreCacheMap[key].Data, nil
+	}
+
+	return "", errors.New("empty key")
+}
+
+/**
+ *  删除缓存数据
+ */
+func (self *WorkWechat) DelCache(key string) int {
+
+	delete(StoreCacheMap, key)
+	return 1
+}
+
+/**
+ *  第三方应用凭证
+ */
+type suiteAccessToken struct {
+	Errcode          int     `json:"errcode"`
+	Errmsg           *string `json:"errmsg"`
+	SuiteAccessToken *string `json:"suite_access_token"`
+	ExpiresIn        int     `json:"expires_in"`
+}
+
+/**
+ *  授权企业凭证
+ */
+type authAccessToken struct {
+	Errcode     int     `json:"errcode"`
+	Errmsg      *string `json:"errmsg"`
+	AccessToken *string `json:"access_token"`
+	ExpiresIn   int     `json:"expires_in"`
+}
+
+/**
+ *  获取服务商凭证
+ */
+type providerAccessToken struct {
+	Errcode             int     `json:"errcode"`
+	Errmsg              *string `json:"errmsg"`
+	ProviderAccessToken *string `json:"provider_access_token"`
+	ExpiresIn           int     `json:"expires_in"`
+}
+
+/**
+ *  jsapi_ticket
+ */
+type jsapiTicket struct {
+	Errcode   int     `json:"errcode"`
+	Errmsg    *string `json:"errmsg"`
+	Ticket    string  `json:"ticket"`
+	ExpiresIn int     `json:"expires_in"`
 }
 
 /**
  *  获取token
  */
-func (w *WorkWechat) GetWorkWechat() *WorkWechat {
-	if len(w.SuiteId) == 0 {
-		key := "WECHAT::" + w.Secret + "qy_access_token"
-		res := Rds.Get(key)
-		fmt.Println("获取TOKEN:", res)
+func (self *WorkWechat) GetWorkWechat() *WorkWechat {
+	if len(self.SuiteId) == 0 {
+		key := "WECHAT::" + self.Secret + "qy_access_token"
+		res, _ := self.GetCache(key)
 		if res != "" {
 			data := make(map[string]interface{})
 			if err := json.Unmarshal([]byte(res), &data); err == nil {
-				w.AccessToken = data["access_token"].(string)
+				self.AccessToken = data["access_token"].(string)
 			} else {
 				fmt.Println("解析失败")
 				fmt.Println(err.Error())
 				return nil
 			}
 		} else {
-			result, err := w.getAccessToken()
+			result, err := self.getAccessToken()
 			if err != nil {
 				return nil
 			}
-			w.AccessToken = result
+			self.AccessToken = result
 		}
 	} else {
-		w.GetSuiteToken()
-		_, err := w.GetCorpToken()
+		self.GetSuiteToken()
+		_, err := self.GetCorpToken()
 		if err != nil {
 			logs.Critical("获取access_token异常：", err.Error())
 		}
 
-		_, er := w.GetProviderToken("ww98ddff0207beced9", "3N7iHhSJfEEx7DNYMWsEcZT-U6p5X19p01GYQQOZedlUzxraeQWNixyHf6QN9IFd")
+		_, er := self.GetProviderToken(self.ProviderCorpid, self.ProviderSecret)
 		if er != nil {
 			logs.Critical("获取provider_access_token异常：", er.Error())
 		}
 	}
 
-	return w
-}
-
-/**
- * 获取token
- */
-func (w *WorkWechat) getAccessToken() (str string, er error) {
-	key := "WECHAT::" + w.Secret + "qy_access_token"
-	url := API_URL_PREFIX + GET_ACCESS_TOKEN + "corpid=" + w.Appid + "&corpsecret=" + w.Secret
-
-	data := make(map[string]interface{})
-	for i := 0; i < 3; i++ {
-		res, err := w.sendForm("GET", url, nil)
-
-		if err != nil {
-			return str, err
-		}
-
-		if err = json.Unmarshal([]byte(res), &data); err == nil && ToInt(data["errcode"]) == 0 {
-			Rds.Set(key, res, ToInt(data["expires_in"])-120)
-			return data["access_token"].(string), nil
-		} else {
-			return str, err
-		}
-	}
-
-	return str, er
+	return self
 }

@@ -2,7 +2,7 @@ package work
 
 import (
 	"encoding/json"
-	"github.com/astaxie/beego/logs"
+	"reflect"
 )
 
 /**
@@ -12,36 +12,25 @@ import (
 //"corpid":"xxxxx",
 //"provider_secret":"xxx"
 //}
-func (w *WorkWechat) GetProviderToken(corpid, providerSecret string) (str string, err error) {
+func (self *WorkWechat) GetProviderToken(corpid, providerSecret string) (str string, err error) {
 	key := "WECHAT_QY::PROVIDER_TOKEN_" + corpid
-	str = Rds.Get(key)
+	str, err = self.GetCache(key)
 
-	if str != "" {
-		tmp := make(map[string]interface{})
-		er := json.Unmarshal([]byte(str), &tmp)
-		if er == nil && w.ProviderAccessToken == ToString(tmp["provider_access_token"]) {
-			Rds.Del(key)
-		} else if er == nil {
-			w.ProviderAccessToken = ToString(tmp["provider_access_token"])
-		} else {
-			logs.Critical("解析TOLKEN信息异常：", er, "ProviderAccessToken:", w.ProviderAccessToken, "tmp:", tmp)
-		}
-	}
+	var providerAccToken providerAccessToken
 
 	if str == "" {
 		url := API_URL_PREFIX + GET_PROVIDER_TOKEN
 		data := make(map[string]interface{})
 		data["corpid"] = corpid
 		data["provider_secret"] = providerSecret
-		str, err = w.sendForm("POST", url, data, corpid, providerSecret)
+		str, err = self.sendForm("POST", url, data, corpid, providerSecret)
+	}
 
-		info := make(map[string]interface{})
-		er := json.Unmarshal([]byte(str), &info)
-		errcode, ok := info["errcode"]
-
-		if er == nil && (!ok || ToInt(errcode) == 0) {
-			w.ProviderAccessToken = ToString(info["provider_access_token"])
-			Rds.Set(key, str, ToInt(info["expires_in"])-120)
+	if str != "" {
+		er := json.Unmarshal([]byte(str), &providerAccToken)
+		if er == nil && providerAccToken.Errcode == 0 {
+			self.ProviderAccessToken = reflect.ValueOf(providerAccToken.ProviderAccessToken).Elem().String()
+			self.SetCacheNx(key, str, providerAccToken.ExpiresIn-120)
 		}
 	}
 
